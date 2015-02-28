@@ -49,33 +49,39 @@ namespace Mono.Posix
 				throw new Exception ("sysctl: unable to estimate routing table size");
 
 			var buf = Marshal.AllocHGlobal (sysctlBufSize);
-			if (Sysctl.sysctl (mib, (uint)mib.Length,
-				buf, ref sysctlBufSize, IntPtr.Zero, IntPtr.Zero) < 0)
-				throw new Exception ("sysctl: unable to retrieve routing table");
 
-			var rtmSize = Marshal.SizeOf<Route.rt_msghdr> ();
-			var sainarpSize = Marshal.SizeOf<Ethernet.sockaddr_inarp> ();
+			try {
+				if (Sysctl.sysctl (mib, (uint)mib.Length,
+					buf, ref sysctlBufSize, IntPtr.Zero, IntPtr.Zero) < 0)
+					throw new Exception ("sysctl: unable to retrieve routing table");
 
-			Route.rt_msghdr rtm;
-			var lim = (long)buf + (long)sysctlBufSize;
-			for (var next = (long)buf; next < lim; next += rtm.rtm_msglen) {
-				rtm = Marshal.PtrToStructure<Route.rt_msghdr> ((IntPtr)next);
-				var sin = Marshal.PtrToStructure<Ethernet.sockaddr_inarp> ((IntPtr)(next + rtmSize));
-				var sdl = Marshal.PtrToStructure<NetLinkLevel.sockaddr_dl> ((IntPtr)(next + rtmSize + sainarpSize));
+				var rtmSize = Marshal.SizeOf<Route.rt_msghdr> ();
+				var sainarpSize = Marshal.SizeOf<Ethernet.sockaddr_inarp> ();
 
-				var entry = new Entry {
-					IPAddress = new IPAddress (sin.sin_addr)
-				};
+				Route.rt_msghdr rtm;
+				var lim = (long)buf + (long)sysctlBufSize;
 
-				if (sdl.sdl_alen > 0) {
-					var phaddr = new byte [sdl.sdl_alen];
-					Array.Copy (sdl.sdl_data, 0, phaddr, 0, sdl.sdl_alen);
-					entry.PhysicalAddress = new PhysicalAddress (phaddr);
+				for (var next = (long)buf; next < lim; next += rtm.rtm_msglen) {
+					rtm = Marshal.PtrToStructure<Route.rt_msghdr> ((IntPtr)next);
+					var sin = Marshal.PtrToStructure<Ethernet.sockaddr_inarp> ((IntPtr)(next + rtmSize));
+					var sdl = Marshal.PtrToStructure<NetLinkLevel.sockaddr_dl> ((IntPtr)(next + rtmSize + sainarpSize));
+
+					var entry = new Entry {
+						IPAddress = new IPAddress (sin.sin_addr)
+					};
+
+					if (sdl.sdl_alen > 0) {
+						var phaddr = new byte [sdl.sdl_alen];
+						Array.Copy (sdl.sdl_data, 0, phaddr, 0, sdl.sdl_alen);
+						entry.PhysicalAddress = new PhysicalAddress (phaddr);
+					}
+
+					entries.Add (entry);
+
+					OnEntryResolved (entry);
 				}
-
-				entries.Add (entry);
-
-				OnEntryResolved (entry);
+			} finally {
+				Marshal.FreeHGlobal (buf);
 			}
 		}
 
